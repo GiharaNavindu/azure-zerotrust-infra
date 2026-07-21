@@ -9,3 +9,8 @@ variable "environment" {
   description = "Deployment environment name."
   default     = "Dev"
 }
+
+variable "admin_ssh_ip" {
+  type        = string
+  description = "The explicit public IPv4 address of the local administrator workstation."
+}

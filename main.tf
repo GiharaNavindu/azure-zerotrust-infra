@@ -99,3 +99,96 @@ resource "azurerm_subnet_network_security_group_association" "app_assoc" {
   subnet_id                 = azurerm_subnet.app.id
   network_security_group_id = azurerm_network_security_group.app_nsg.id
 }
+
+# 1. Management Subnet Network Security Group
+resource "azurerm_network_security_group" "mgmt_nsg" {
+  name                = "nsg-snet-mgmt-dev"
+  location            = azurerm_resource_group.app_rg.location
+  resource_group_name = azurerm_resource_group.app_rg.name
+
+  # Security Principle: Strict Least-Privilege Inbound Filter
+  security_rule {
+    name                       = "Allow-SSH-From-Admin"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = var.admin_ssh_ip 
+    destination_address_prefix = "*"
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+# Associate Management NSG to snet-mgmt Subnet
+resource "azurerm_subnet_network_security_group_association" "mgmt_assoc" {
+  subnet_id                 = azurerm_subnet.mgmt.id
+  network_security_group_id = azurerm_network_security_group.mgmt_nsg.id
+}
+
+# 2. Public IP for the Jumpbox
+resource "azurerm_public_ip" "jumpbox_pip" {
+  name                = "pip-vm-jumpbox-dev"
+  location            = azurerm_resource_group.app_rg.location
+  resource_group_name = azurerm_resource_group.app_rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
+
+# 3. Network Interface Card for the Jumpbox VM
+resource "azurerm_network_interface" "jumpbox_nic" {
+  name                = "nic-vm-jumpbox-dev"
+  location            = azurerm_resource_group.app_rg.location
+  resource_group_name = azurerm_resource_group.app_rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.mgmt.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.jumpbox_pip.id
+  }
+}
+
+# 4. The Linux Virtual Machine Compute Engine
+resource "azurerm_linux_virtual_machine" "jumpbox" {
+  name                = "vm-jumpbox-dev"
+  location            = azurerm_resource_group.app_rg.location
+  resource_group_name = azurerm_resource_group.app_rg.name
+  size                = "Standard_F2as_v7"
+  admin_username      = "azureuser"
+  network_interface_ids = [
+    azurerm_network_interface.jumpbox_nic.id
+  ]
+
+  admin_ssh_key {
+    username   = "azureuser"
+    public_key = file("~/.ssh/id_azure_rsa.pub")
+  }
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
+}
